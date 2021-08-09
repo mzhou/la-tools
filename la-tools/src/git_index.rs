@@ -30,11 +30,13 @@ pub struct EntryHeader {
     pub uid: U32<NetworkEndian>,
     pub gid: U32<NetworkEndian>,
     pub size: U32<NetworkEndian>,
-    pub sha1: [u8; 20],
+    pub sha1: Hash,
     pub flags: U16<NetworkEndian>,
 }
 
 assert_eq_size!(EntryHeader, [u8; 62]);
+
+pub type Hash = [u8; 20];
 
 #[derive(Debug)]
 pub struct ViewEntry<'a> {
