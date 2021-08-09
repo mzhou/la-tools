@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{copy, stdout, Error, Read, Seek, SeekFrom, Write};
+use std::io::{copy, stdout, Error, Seek, SeekFrom};
 use std::iter::Iterator;
 
 use la_tools::git_object;
@@ -27,12 +27,6 @@ fn try_main() -> Result<i32, Error> {
     let mut out = stdout();
 
     copy(&mut git_obj_read, &mut out)?;
-
-    /*
-    let mut full = Vec::<u8>::default();
-    git_obj_read.read_to_end(&mut full)?;
-    out.write_all(&full)?;
-    */
 
     Ok(0)
 }

@@ -30,6 +30,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "extract-git-object"
+version = "0.1.0"
+dependencies = [
+ "la-tools",
+]
+
+[[package]]
 name = "flate2"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"

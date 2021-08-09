@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "extract-git-object",
     "la-tools",
     "make-git-object",
 ]
