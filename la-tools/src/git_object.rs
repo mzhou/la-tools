@@ -1,8 +1,11 @@
 use std::cmp::min;
-use std::io::{Error, ErrorKind, Read, Result};
+use std::io::{Error, ErrorKind, Read, Result, Write};
 
 use flate2::read::{ZlibDecoder, ZlibEncoder};
 use flate2::Compression;
+use sha1::Sha1;
+
+pub use sha1::Digest;
 
 pub struct GitObjectReadSync<R: Read> {
     header_skipped: bool,
@@ -62,4 +65,10 @@ pub fn decode_sync<'a, R: Read + 'a>(read: R) -> impl Read + 'a {
         header_skipped: false,
         r: ZlibDecoder::new(read),
     }
+}
+
+pub fn hash_sync(size: u64) -> impl Digest<OutputSize = <Sha1 as Digest>::OutputSize> + Write {
+    let mut state = Sha1::new();
+    state.update(format!("blob {}\0", size).as_bytes());
+    state
 }
