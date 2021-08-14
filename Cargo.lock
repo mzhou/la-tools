@@ -116,6 +116,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "la-tools-multi"
+version = "0.1.0"
+dependencies = [
+ "extract-git-object",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"

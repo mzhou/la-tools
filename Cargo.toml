@@ -3,6 +3,7 @@
 members = [
     "extract-git-object",
     "la-tools",
+    "la-tools-multi",
     "hash-git-object",
     "make-git-object",
     "patch-git-index",
