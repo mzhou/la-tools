@@ -7,3 +7,4 @@ edition = "2018"
 
 [dependencies]
 extract-git-object = { path = "../extract-git-object" }
+hash-git-object = { path = "../hash-git-object" }

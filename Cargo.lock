@@ -120,6 +120,7 @@ name = "la-tools-multi"
 version = "0.1.0"
 dependencies = [
  "extract-git-object",
+ "hash-git-object",
 ]
 
 [[package]]

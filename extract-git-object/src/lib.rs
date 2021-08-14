@@ -4,7 +4,11 @@ use std::io::{copy, stdin, stdout};
 
 use la_tools::git_object;
 
-pub fn try_main<I, T>(_itr: I) -> Result<i32, Box<dyn Error>> where I: IntoIterator<Item = T>, T: Into<OsString> + Clone {
+pub fn try_main<I, T>(_itr: I) -> Result<i32, Box<dyn Error>>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
     let in_file = stdin();
     let mut out_file = stdout();
 
