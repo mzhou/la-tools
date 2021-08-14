@@ -121,6 +121,7 @@ version = "0.1.0"
 dependencies = [
  "extract-git-object",
  "hash-git-object",
+ "make-git-object",
 ]
 
 [[package]]

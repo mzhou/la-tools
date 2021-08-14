@@ -1,9 +1,10 @@
 use std::error::Error;
 use std::ffi::OsString;
 
-const APPLET_NAMES: &[&str] = &[EXTRACT_GIT_OBJECT, HASH_GIT_OBJECT];
+const APPLET_NAMES: &[&str] = &[EXTRACT_GIT_OBJECT, HASH_GIT_OBJECT, MAKE_GIT_OBJECT];
 const EXTRACT_GIT_OBJECT: &str = "extract-git-object";
 const HASH_GIT_OBJECT: &str = "hash-git-object";
+const MAKE_GIT_OBJECT: &str = "make-git-object";
 
 pub fn try_main<I, T>(itr: I) -> Result<i32, Box<dyn Error>>
 where
@@ -32,6 +33,7 @@ fn try_dispatch(applet_name: &str, args: &[OsString]) -> Option<Result<i32, Box<
     match applet_name {
         EXTRACT_GIT_OBJECT => Some(extract_git_object::try_main(args)),
         HASH_GIT_OBJECT => Some(hash_git_object::try_main(args)),
+        MAKE_GIT_OBJECT => Some(make_git_object::try_main(args)),
         _ => None,
     }
 }
