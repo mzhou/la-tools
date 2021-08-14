@@ -1,10 +1,16 @@
 use std::error::Error;
 use std::ffi::OsString;
 
-const APPLET_NAMES: &[&str] = &[EXTRACT_GIT_OBJECT, HASH_GIT_OBJECT, MAKE_GIT_OBJECT];
+const APPLET_NAMES: &[&str] = &[
+    EXTRACT_GIT_OBJECT,
+    HASH_GIT_OBJECT,
+    MAKE_GIT_OBJECT,
+    PATCH_GIT_INDEX,
+];
 const EXTRACT_GIT_OBJECT: &str = "extract-git-object";
 const HASH_GIT_OBJECT: &str = "hash-git-object";
 const MAKE_GIT_OBJECT: &str = "make-git-object";
+const PATCH_GIT_INDEX: &str = "patch-git-index";
 
 pub fn try_main<I, T>(itr: I) -> Result<i32, Box<dyn Error>>
 where
