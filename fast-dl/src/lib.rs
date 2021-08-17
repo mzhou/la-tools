@@ -2,6 +2,9 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::path::Path;
+
+use tokio::fs::create_dir_all;
 
 use clap::Clap;
 use ini::Ini;
@@ -11,8 +14,6 @@ use la_tools::git_index;
 
 #[derive(Clap)]
 struct Opts {
-    #[clap(long, default_value = "4")]
-    disk_threads: usize,
     #[clap(long, default_value = "")]
     output_dir: String,
     #[clap(long, default_value = "64")]
@@ -94,6 +95,26 @@ where
 
     for d in dirs.iter() {
         eprintln!("    {}", d);
+    }
+
+    let mut out_dir = opts.output_dir;
+    if out_dir.is_empty() {
+        out_dir = get_fallback_output_dir();
+    }
+    if out_dir.is_empty() {
+        eprintln!("Run the official installer at least once, or specify --output-dir");
+        return Ok(2);
+    }
+
+    eprintln!("Will download to {}", &out_dir);
+
+    let out_path = Path::new(&out_dir);
+
+    eprintln!("Creating directories");
+    for d in dirs.iter() {
+        let p = out_path.join(d);
+        eprintln!("    {}", p.to_string_lossy());
+        create_dir_all(&p).await?;
     }
 
     Ok(0)
