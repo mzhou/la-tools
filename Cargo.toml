@@ -2,6 +2,7 @@
 
 members = [
     "extract-git-object",
+    "fast-dl",
     "la-tools",
     "la-tools-multi",
     "hash-git-object",
