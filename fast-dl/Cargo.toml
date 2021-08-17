@@ -9,4 +9,8 @@ edition = "2018"
 clap = { version = "3.0.0-beta.4" }
 la-tools = { path = "../la-tools" }
 reqwest = { version = "0.11" }
+rust-ini = { version = "0.17" }
 tokio = { features = ["full"], version = "1.10" }
+
+[target.'cfg(windows)'.dependencies]
+winreg = { version = "0.9" }

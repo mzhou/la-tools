@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use clap::Clap;
+use ini::Ini;
 use reqwest::Client;
 
 #[derive(Clap)]
@@ -28,15 +29,38 @@ where
         .build()?;
 
     eprintln!("Downloading version.ini");
-    let version_ini = client
+    let version_ini_str = client
         .get("http://games.cdn.gameon.jp/lostark/version.ini")
         .send()
-        .await;
-    eprintln!("{:?}", version_ini);
+        .await?
+        .text()
+        .await?;
+
+    let version_ini = Ini::load_from_str(&version_ini_str)?;
+    let index_str = version_ini.get_from(Some("VERSION"), "INDEX").unwrap_or("");
+
+    eprintln!("Current version is {}", index_str);
+
+    if index_str.is_empty() {
+        eprintln!("Invalid  VERSION.INDEX in version.ini");
+        return Ok(1);
+    }
 
     Ok(0)
 }
 
+#[cfg(not(target_os = "windows"))]
 fn get_fallback_output_dir() -> String {
-    "C:\\GameOn\\LOST ARK".into()
+    "".into()
+}
+
+#[cfg(target_os = "windows")]
+fn get_fallback_output_dir() -> String {
+    {
+        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+        let la_key = hkcu.open_subkey("SOFTWARE\\GameOn\\Pmang\\lostark")?;
+        let location_val = la_key.get_value("location")?;
+        Some(location_val)
+    }
+    .unwrap_or("")
 }
