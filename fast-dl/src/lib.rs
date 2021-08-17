@@ -1,20 +1,29 @@
+#![feature(iter_zip)]
+
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::fs::{create_dir_all, File};
 use std::io::{Seek, SeekFrom};
+use std::iter::zip;
+use std::mem::drop;
 use std::path::Path;
+use std::sync::Arc;
 
 use clap::Clap;
+use generic_array::GenericArray;
 use ini::Ini;
+use reqwest::header::CONTENT_LENGTH;
 use reqwest::Client;
+use tokio::sync::Semaphore;
 
 use la_tools::git_index;
 
 struct FinalFile {
     hash: git_index::Hash,
     name: String,
+    obj_size: u64,
     size: u64,
 }
 
@@ -96,6 +105,7 @@ where
             Some(FinalFile {
                 hash: e.header.sha1,
                 name: s.to_string(),
+                obj_size: 0,
                 size: e.header.size.into(),
             })
         })
@@ -144,7 +154,7 @@ where
     }
 
     eprintln!("Checking for already completed files:");
-    let todo_entries: Vec<FinalFile> = entries
+    let mut todo_entries: Vec<FinalFile> = entries
         .into_iter()
         .filter_map(|e| {
             if let Ok(mut f) = File::open(out_path.join(&e.name)) {
@@ -160,6 +170,49 @@ where
         .collect();
 
     eprintln!("{} files left to download", todo_entries.len());
+
+    let net_sem = Arc::new(Semaphore::new(opts.network_threads));
+
+    eprintln!("Downloading object information");
+    let mut obj_size_tasks = todo_entries
+        .iter()
+        .map(|e| {
+            let sem = net_sem.clone();
+            let hash_str = format!("{:x}", GenericArray::from(e.hash));
+            let url = format!(
+                "http://la.cdn.gameon.jp/la/patch/objects/{}/{}",
+                &hash_str[..2],
+                &hash_str[2..]
+            );
+            let req = client.head(url);
+            tokio::spawn(async move {
+                let _permit = sem.acquire_owned();
+                let res_result = req.send().await;
+                drop(_permit);
+                res_result
+            })
+        })
+        .collect::<Vec<_>>();
+
+    //eprintln!("Content lengths:");
+    for (e, t) in zip(todo_entries.iter_mut(), obj_size_tasks.iter_mut()) {
+        let res = t.await??;
+        match res.headers().get(CONTENT_LENGTH) {
+            Some(s) => {
+                e.obj_size = s.to_str()?.parse()?;
+                //eprintln!("    {} {}", e.name, e.obj_size);
+            }
+            None => {
+                eprintln!(
+                    "Could not get content length of {} ({:x}) {:?}",
+                    e.name,
+                    GenericArray::from(e.hash),
+                    res
+                );
+                return Ok(4);
+            }
+        }
+    }
 
     Ok(0)
 }

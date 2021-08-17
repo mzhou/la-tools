@@ -7,6 +7,7 @@ edition = "2018"
 
 [dependencies]
 clap = { version = "3.0.0-beta.4" }
+generic-array = { version = "0.14" }
 la-tools = { path = "../la-tools" }
 reqwest = { version = "0.11" }
 rust-ini = { version = "0.17" }
