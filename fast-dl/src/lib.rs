@@ -23,7 +23,6 @@ use la_tools::git_index;
 struct FinalFile {
     hash: git_index::Hash,
     name: String,
-    obj_size: u64,
     size: u64,
 }
 
@@ -105,7 +104,6 @@ where
             Some(FinalFile {
                 hash: e.header.sha1,
                 name: s.to_string(),
-                obj_size: 0,
                 size: e.header.size.into(),
             })
         })
@@ -154,7 +152,7 @@ where
     }
 
     eprintln!("Checking for already completed files:");
-    let mut todo_entries: Vec<FinalFile> = entries
+    let todo_entries: Vec<FinalFile> = entries
         .into_iter()
         .filter_map(|e| {
             if let Ok(mut f) = File::open(out_path.join(&e.name)) {
@@ -174,7 +172,7 @@ where
     let net_sem = Arc::new(Semaphore::new(opts.network_threads));
 
     eprintln!("Downloading object information");
-    let mut obj_size_tasks = todo_entries
+    let obj_size_tasks = todo_entries
         .iter()
         .map(|e| {
             let sem = net_sem.clone();
@@ -194,13 +192,14 @@ where
         })
         .collect::<Vec<_>>();
 
-    //eprintln!("Content lengths:");
-    for (e, t) in zip(todo_entries.iter_mut(), obj_size_tasks.iter_mut()) {
+    let mut obj_sizes = Vec::<u64>::new();
+    obj_sizes.reserve_exact(todo_entries.len());
+    for (e, t) in zip(todo_entries.iter(), obj_size_tasks.into_iter()) {
         let res = t.await??;
         match res.headers().get(CONTENT_LENGTH) {
             Some(s) => {
-                e.obj_size = s.to_str()?.parse()?;
-                //eprintln!("    {} {}", e.name, e.obj_size);
+                let obj_size = s.to_str()?.parse()?;
+                obj_sizes.push(obj_size);
             }
             None => {
                 eprintln!(
