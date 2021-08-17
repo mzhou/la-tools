@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fs::{create_dir_all, File};
+use std::io::{Seek, SeekFrom};
 use std::path::Path;
-
-use tokio::fs::create_dir_all;
 
 use clap::Clap;
 use ini::Ini;
@@ -12,8 +12,16 @@ use reqwest::Client;
 
 use la_tools::git_index;
 
+struct FinalFile {
+    hash: git_index::Hash,
+    name: String,
+    size: u64,
+}
+
 #[derive(Clap)]
 struct Opts {
+    #[clap(long, default_value = "4")]
+    disk_threads: usize,
     #[clap(long, default_value = "")]
     output_dir: String,
     #[clap(long, default_value = "64")]
@@ -80,15 +88,33 @@ where
 
     eprintln!("Index defines {} files", index.entries.len());
 
-    eprintln!("Calculating directories");
-
-    let dirs: BTreeSet<String> = index
+    let entries: Vec<FinalFile> = index
         .entries
         .iter()
         .filter_map(|e| {
             let s = std::str::from_utf8(e.name).ok()?;
-            Some(s[..s.rfind('/')?].into())
+            Some(FinalFile {
+                hash: e.header.sha1,
+                name: s.to_string(),
+                size: e.header.size.into(),
+            })
         })
+        .collect();
+
+    if entries.len() != index.entries.len() {
+        eprintln!(
+            "{} files had invalid filenames",
+            index.entries.len() - entries.len()
+        );
+        return Ok(2);
+    }
+
+    eprintln!("Calculating directories");
+
+    let dirs: BTreeSet<String> = entries
+        .iter()
+        .map(|e| &e.name)
+        .filter_map(|n| Some(n[..n.rfind('/')?].into()))
         .collect();
 
     eprintln!("Found {} directories:", dirs.len());
@@ -103,7 +129,7 @@ where
     }
     if out_dir.is_empty() {
         eprintln!("Run the official installer at least once, or specify --output-dir");
-        return Ok(2);
+        return Ok(3);
     }
 
     eprintln!("Will download to {}", &out_dir);
@@ -114,8 +140,26 @@ where
     for d in dirs.iter() {
         let p = out_path.join(d);
         eprintln!("    {}", p.to_string_lossy());
-        create_dir_all(&p).await?;
+        create_dir_all(&p)?;
     }
+
+    eprintln!("Checking for already completed files:");
+    let todo_entries: Vec<FinalFile> = entries
+        .into_iter()
+        .filter_map(|e| {
+            if let Ok(mut f) = File::open(out_path.join(&e.name)) {
+                if let Ok(size) = f.seek(SeekFrom::End(0)) {
+                    if size == e.size {
+                        eprintln!("    {}", e.name);
+                        return None;
+                    }
+                }
+            }
+            Some(e)
+        })
+        .collect();
+
+    eprintln!("{} files left to download", todo_entries.len());
 
     Ok(0)
 }
