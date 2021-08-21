@@ -20,6 +20,8 @@ use tokio::sync::Semaphore;
 
 use la_tools::git_index;
 
+mod io_mgr;
+
 struct FinalFile {
     hash: git_index::Hash,
     name: String,
