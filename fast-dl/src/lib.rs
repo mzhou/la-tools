@@ -17,13 +17,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Clap;
-use doh_dns::{client::HyperDnsClient, Dns, DnsHttpsServer};
 use generic_array::{typenum::U20, GenericArray};
 use ini::Ini;
 use reqwest::header::{CONTENT_LENGTH, RANGE};
 use reqwest::{Client, Error as RequestError};
 use tokio::sync::Semaphore;
 use tokio::task::{JoinError, JoinHandle};
+use trust_dns_resolver::config::{NameServerConfigGroup, ResolverConfig, ResolverOpts};
+use trust_dns_resolver::AsyncResolver;
 
 use la_tools::git_index;
 use la_tools::git_index::Hash;
@@ -103,27 +104,30 @@ where
 
     if !opts.system_dns {
         eprintln!("Finding real IP of la.cdn.gameon.jp");
-        let cdn_ip_str = async move {
-            let responses = async move {
-                let dns: Dns<HyperDnsClient> = Dns::with_servers(&[
-                    DnsHttpsServer::Google(Duration::from_secs(2)),
-                    DnsHttpsServer::Cloudflare1_1_1_1(Duration::from_secs(2)),
-                ])?;
-                dns.resolve_a("la.cdn.gameon.jp").await
-            }
+        let mut group = NameServerConfigGroup::cloudflare_https();
+        group.merge(NameServerConfigGroup::google_https());
+        let resolver = AsyncResolver::tokio(
+            ResolverConfig::from_parts(None, vec![], group),
+            ResolverOpts::default(),
+        )
+        .map_err(|_| MainError::DohFail)?;
+        let responses = resolver
+            .ipv4_lookup("la.cdn.gameon.jp")
             .await
             .map_err(|_| MainError::DohFail)?;
-            for response in responses {
-                return Ok(response.data);
-            }
-            Err(MainError::DohFail)
+        let mut found = false;
+        for response in responses.iter() {
+            let cdn_ip = response;
+            eprintln!("la.cdn.gameon.jp is at {}", cdn_ip);
+            let cdn_addr = std::net::SocketAddrV4::new(*cdn_ip, 80);
+            client_builder = client_builder.resolve("la.cdn.gameon.jp", cdn_addr.into());
+            found = true;
+            break;
         }
-        .await?;
-        eprintln!("la.cdn.gameon.jp is at {}", cdn_ip_str);
-        let cdn_addr: std::net::SocketAddrV4 = (cdn_ip_str + ":80")
-            .parse()
-            .map_err(|_| MainError::DohFail)?;
-        client_builder = client_builder.resolve("la.cdn.gameon.jp", cdn_addr.into());
+        if !found {
+            eprintln!("DNS resolution failed");
+            return Ok(1);
+        }
     }
 
     let client = client_builder.build()?;
@@ -145,7 +149,7 @@ where
 
     if index_name_str.is_empty() {
         eprintln!("Invalid VERSION.INDEX in version.ini");
-        return Ok(1);
+        return Ok(2);
     }
 
     eprintln!("Downloading index");
@@ -180,7 +184,7 @@ where
             "{} files had invalid filenames",
             index.entries.len() - entries.len()
         );
-        return Ok(2);
+        return Ok(3);
     }
 
     eprintln!("Calculating directories");
@@ -203,7 +207,7 @@ where
     }
     if out_dir.is_empty() {
         eprintln!("Run the official installer at least once, or specify --output-dir");
-        return Ok(3);
+        return Ok(4);
     }
 
     eprintln!("Will download to {}", &out_dir);
@@ -271,7 +275,7 @@ where
                     GenericArray::from(e.hash),
                     res
                 );
-                return Ok(4);
+                return Ok(5);
             }
         }
     }
@@ -284,11 +288,12 @@ where
     let mut total_chunks = 0u64;
     let file_tasks = zip(todo_entries.iter(), content_lengths.iter())
         .map(|(e, l)| {
+            let len = *l;
             let name = e.name.clone();
             let tmp_path = out_path.join(format!("{}.tmp", &name));
             let url = url_for_hash(&e.hash);
 
-            let total_file_chunks = (l + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            let total_file_chunks = (len + CHUNK_SIZE - 1) / CHUNK_SIZE;
             total_chunks += total_file_chunks;
             let mut chunk_tasks = Vec::<JoinHandle<Result<(), ChunkError>>>::new();
             for chunk_i in 0u64..total_file_chunks {
@@ -298,7 +303,7 @@ where
                 let url_clone = url.clone();
 
                 let range_begin = chunk_i * CHUNK_SIZE;
-                let range_end = min(*l, (chunk_i + 1u64) * CHUNK_SIZE);
+                let range_end = min(len, (chunk_i + 1u64) * CHUNK_SIZE);
                 let range_size = range_end - range_begin;
                 let range_str = format!("bytes={}-{}", range_begin, range_end - 1);
                 let req = client_ref.get(url_clone.clone()).header(RANGE, range_str.clone()).build().unwrap(); // TODO: eliminate unwrap
@@ -308,7 +313,7 @@ where
                     let _permit = sem.acquire_owned();
                     // now acquire mmap
                     // TODO: make the conversion from u64 to usize nicer
-                    let mut mapping = create_mmap(tmp_path_clone, range_begin, range_size as usize).map_err(ChunkError::Io)?;
+                    let mut mapping = create_mmap(tmp_path_clone, len, range_begin, range_size as usize).map_err(ChunkError::Io)?;
                     let mut retry = 0;
                     loop {
                         // send request and wait for response
