@@ -2,6 +2,7 @@
 
 mod io_mgr;
 
+use std::cmp::min;
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsString;
@@ -18,7 +19,7 @@ use clap::Clap;
 use doh_dns::{client::HyperDnsClient, Dns, DnsHttpsServer};
 use generic_array::{typenum::U20, GenericArray};
 use ini::Ini;
-use reqwest::header::CONTENT_LENGTH;
+use reqwest::header::{CONTENT_LENGTH, RANGE};
 use reqwest::Client;
 use tokio::sync::Semaphore;
 
@@ -60,7 +61,7 @@ impl Display for MainError {
 
 impl Error for MainError {}
 
-const CHUNK_SIZE: usize = 16 * 1024 * 1024;
+const CHUNK_SIZE: u64 = 16 * 1024 * 1024;
 
 #[tokio::main]
 pub async fn try_main<I, T>(itr: I) -> Result<i32, Box<dyn Error>>
@@ -214,12 +215,7 @@ where
         .iter()
         .map(|e| {
             let sem = net_sem.clone();
-            let hash_str = format!("{:x}", GenericArray::from(e.hash));
-            let url = format!(
-                "http://la.cdn.gameon.jp/la/patch/objects/{}/{}",
-                &hash_str[..2],
-                &hash_str[2..]
-            );
+            let url = url_for_hash(&e.hash);
             let req = client.head(url);
             tokio::spawn(async move {
                 let _permit = sem.acquire_owned();
@@ -260,11 +256,20 @@ where
 
     let mut io_mgr = Arc::new(Mutex::new(IoMgr::new()));
 
-    let total_chunks = 0usize;
-    for (e, l) in zip(todo_entries.iter(), content_lengths.iter()) {
-        let tmp_path = out_path.join(format!("{}.tmp", &e.name));
-        let url = url_for_hash(&e.hash);
-    }
+    let total_chunks = 0u64;
+    let get_tasks = zip(todo_entries.iter(), content_lengths.iter())
+        .map(|(e, l)| {
+            let tmp_path = out_path.join(format!("{}.tmp", &e.name));
+            let url = url_for_hash(&e.hash);
+            let total_file_chunks = (l + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            for chunk_i in 0u64..total_file_chunks {
+                let range_first = chunk_i * CHUNK_SIZE;
+                let range_last = min(*l, (chunk_i + 1u64) * CHUNK_SIZE) - 1;
+                let range_str = format!("bytes={}-{}", range_first, range_last);
+                let req = client.get(url.clone()).header(RANGE, range_str);
+            }
+        })
+        .collect::<Vec<_>>();
 
     Ok(0)
 }
