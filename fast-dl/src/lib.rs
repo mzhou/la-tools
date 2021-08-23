@@ -249,7 +249,7 @@ where
             let url = url_for_hash(&e.hash);
             let req = client.head(url);
             tokio::spawn(async move {
-                let _permit = sem.acquire_owned();
+                let _permit = sem.acquire_owned().await.unwrap();
                 let res_result = req.send().await;
                 drop(_permit);
                 res_result
@@ -310,7 +310,7 @@ where
                 let tmp_path_clone = tmp_path.clone();
                 let task = tokio::spawn(async move {
                     // first take the semaphore so that we don't open files before we're ready
-                    let _permit = sem.acquire_owned();
+                    let _permit = sem.acquire_owned().await.unwrap();
                     // now acquire mmap
                     // TODO: make the conversion from u64 to usize nicer
                     let mut mapping = create_mmap(tmp_path_clone, len, range_begin, range_size as usize).map_err(ChunkError::Io)?;
@@ -333,6 +333,7 @@ where
                                 }
                                 let bytes = res.bytes().await.map_err(ChunkError::Request)?;
                                 mapping.copy_from_slice(bytes.as_ref());
+                                mapping.flush_async().map_err(ChunkError::Io)?;
                                 break;
                             }
                             Err(e) => {
