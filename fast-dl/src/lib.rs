@@ -1,5 +1,7 @@
 #![feature(iter_zip)]
 
+mod io_mgr;
+
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsString;
@@ -14,20 +16,19 @@ use std::time::Duration;
 
 use clap::Clap;
 use doh_dns::{client::HyperDnsClient, Dns, DnsHttpsServer};
-use generic_array::GenericArray;
+use generic_array::{typenum::U20, GenericArray};
 use ini::Ini;
 use reqwest::header::CONTENT_LENGTH;
 use reqwest::Client;
 use tokio::sync::Semaphore;
 
 use la_tools::git_index;
-
-mod io_mgr;
+use la_tools::git_index::Hash;
 
 use io_mgr::IoMgr;
 
 struct FinalFile {
-    hash: git_index::Hash,
+    hash: Hash,
     name: String,
     size: u64,
 }
@@ -58,6 +59,8 @@ impl Display for MainError {
 }
 
 impl Error for MainError {}
+
+const CHUNK_SIZE: usize = 16 * 1024 * 1024;
 
 #[tokio::main]
 pub async fn try_main<I, T>(itr: I) -> Result<i32, Box<dyn Error>>
@@ -258,7 +261,10 @@ where
     let mut io_mgr = Arc::new(Mutex::new(IoMgr::new()));
 
     let total_chunks = 0usize;
-    for (e, l) in zip(todo_entries.iter(), content_lengths.iter()) {}
+    for (e, l) in zip(todo_entries.iter(), content_lengths.iter()) {
+        let tmp_path = out_path.join(format!("{}.tmp", &e.name));
+        let url = url_for_hash(&e.hash);
+    }
 
     Ok(0)
 }
@@ -277,4 +283,14 @@ fn get_fallback_output_dir() -> String {
         Some(location_val)
     }
     .unwrap_or("")
+}
+
+fn url_for_hash<'a>(hash: &Hash) -> String {
+    let hash_str = format!("{:x}", GenericArray::<u8, U20>::from_slice(hash));
+    let url = format!(
+        "http://la.cdn.gameon.jp/la/patch/objects/{}/{}",
+        &hash_str[..2],
+        &hash_str[2..]
+    );
+    url
 }
