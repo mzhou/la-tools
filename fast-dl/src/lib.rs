@@ -1,3 +1,4 @@
+#![feature(duration_consts_2)]
 #![feature(iter_zip)]
 
 mod io_mgr;
@@ -8,11 +9,11 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::fs::{create_dir_all, File};
-use std::io::{Seek, SeekFrom};
+use std::io::{Error as IoError, Seek, SeekFrom};
 use std::iter::zip;
 use std::mem::drop;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Clap;
@@ -20,13 +21,14 @@ use doh_dns::{client::HyperDnsClient, Dns, DnsHttpsServer};
 use generic_array::{typenum::U20, GenericArray};
 use ini::Ini;
 use reqwest::header::{CONTENT_LENGTH, RANGE};
-use reqwest::Client;
+use reqwest::{Client, Error as RequestError};
 use tokio::sync::Semaphore;
+use tokio::task::{JoinError, JoinHandle};
 
 use la_tools::git_index;
 use la_tools::git_index::Hash;
 
-use io_mgr::IoMgr;
+use io_mgr::create_mmap;
 
 struct FinalFile {
     hash: Hash,
@@ -46,11 +48,35 @@ struct Opts {
     system_dns: bool,
 }
 
+#[derive(Debug)]
+enum ChunkError {
+    Io(IoError),
+    Join(JoinError),
+    Request(RequestError),
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum MainError {
     DohFail,
     InvalidVersionIni,
     InvalidGitIndex,
+}
+
+impl Display for ChunkError {
+    fn fmt(self: &Self, f: &mut Formatter) -> FmtResult {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for ChunkError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        use ChunkError::*;
+        match self {
+            Io(e) => e.source(),
+            Join(e) => e.source(),
+            Request(e) => e.source(),
+        }
+    }
 }
 
 impl Display for MainError {
@@ -62,6 +88,7 @@ impl Display for MainError {
 impl Error for MainError {}
 
 const CHUNK_SIZE: u64 = 16 * 1024 * 1024;
+const RETRY_WAIT_BASE: Duration = Duration::new(1, 0); // 1 second
 
 #[tokio::main]
 pub async fn try_main<I, T>(itr: I) -> Result<i32, Box<dyn Error>>
@@ -254,22 +281,93 @@ where
         (total_content_length as f64) / 1024. / 1024. / 1024.
     );
 
-    let mut io_mgr = Arc::new(Mutex::new(IoMgr::new()));
-
-    let total_chunks = 0u64;
-    let get_tasks = zip(todo_entries.iter(), content_lengths.iter())
+    let mut total_chunks = 0u64;
+    let file_tasks = zip(todo_entries.iter(), content_lengths.iter())
         .map(|(e, l)| {
-            let tmp_path = out_path.join(format!("{}.tmp", &e.name));
+            let name = e.name.clone();
+            let tmp_path = out_path.join(format!("{}.tmp", &name));
             let url = url_for_hash(&e.hash);
+
             let total_file_chunks = (l + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            total_chunks += total_file_chunks;
+            let mut chunk_tasks = Vec::<JoinHandle<Result<(), ChunkError>>>::new();
             for chunk_i in 0u64..total_file_chunks {
-                let range_first = chunk_i * CHUNK_SIZE;
-                let range_last = min(*l, (chunk_i + 1u64) * CHUNK_SIZE) - 1;
-                let range_str = format!("bytes={}-{}", range_first, range_last);
-                let req = client.get(url.clone()).header(RANGE, range_str);
+                let client_ref = client.clone();
+                let name_clone = name.clone();
+                let sem = net_sem.clone();
+                let url_clone = url.clone();
+
+                let range_begin = chunk_i * CHUNK_SIZE;
+                let range_end = min(*l, (chunk_i + 1u64) * CHUNK_SIZE);
+                let range_size = range_end - range_begin;
+                let range_str = format!("bytes={}-{}", range_begin, range_end - 1);
+                let req = client_ref.get(url_clone.clone()).header(RANGE, range_str.clone()).build().unwrap(); // TODO: eliminate unwrap
+                let tmp_path_clone = tmp_path.clone();
+                let task = tokio::spawn(async move {
+                    // first take the semaphore so that we don't open files before we're ready
+                    let _permit = sem.acquire_owned();
+                    // now acquire mmap
+                    // TODO: make the conversion from u64 to usize nicer
+                    let mut mapping = create_mmap(tmp_path_clone, range_begin, range_size as usize).map_err(ChunkError::Io)?;
+                    let mut retry = 0;
+                    loop {
+                        // send request and wait for response
+                        let res_result = client_ref.execute(req.try_clone().unwrap()).await; // TODO: eliminate unwrap
+                        // verify result
+                        match res_result {
+                            Ok(res) => {
+                                if res.status() != 206 {
+                                    let delay = RETRY_WAIT_BASE * 2u32.pow(retry);
+                                    eprintln!(
+                                        "Error downloading {} ({}) chunk {} ({}) (retry {}) wait {:?}: {}",
+                                        &name_clone, &url_clone, chunk_i, &range_str, retry, &delay, res.status()
+                                    );
+                                    tokio::time::sleep(delay).await;
+                                    retry += 1;
+                                    continue;
+                                }
+                                let bytes = res.bytes().await.map_err(ChunkError::Request)?;
+                                mapping.copy_from_slice(bytes.as_ref());
+                                break;
+                            }
+                            Err(e) => {
+                                let delay = RETRY_WAIT_BASE * 2u32.pow(retry);
+                                eprintln!(
+                                    "Error downloading {} ({}) chunk {} ({}) (retry {}) wait {:?}: {:?}",
+                                    &name_clone, &url_clone, chunk_i, &range_str, retry, &delay, e
+                                );
+                                tokio::time::sleep(delay).await;
+                                retry += 1;
+                            }
+                        }
+                    }
+                    // allow another task to request
+                    drop(_permit);
+                    Ok(())
+                });
+                chunk_tasks.push(task);
+            }
+
+            // TODO: task to decode the git object
+            {
+                let task = tokio::spawn(async move {
+                    for t in chunk_tasks.into_iter() {
+                        t.await.map_err(ChunkError::Join)??;
+                    }
+                    // TODO: actually decode
+                    eprintln!("Chunk tasks complete for {}", &name);
+                    Ok::<(), ChunkError>(())
+                });
+                task
             }
         })
         .collect::<Vec<_>>();
+
+    for t in file_tasks.into_iter() {
+        t.await??;
+    }
+
+    eprintln!("All done!");
 
     Ok(0)
 }
