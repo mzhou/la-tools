@@ -7,6 +7,7 @@ edition = "2018"
 
 [dependencies]
 clap = { version = "3.0.0-beta.4" }
+doh-dns = { version = "0.2" }
 generic-array = { version = "0.14" }
 la-tools = { path = "../la-tools" }
 memmap2 = { version = "0.3" }

@@ -9,9 +9,11 @@ use std::io::{Seek, SeekFrom};
 use std::iter::zip;
 use std::mem::drop;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clap::Clap;
+use doh_dns::{client::HyperDnsClient, Dns, DnsHttpsServer};
 use generic_array::GenericArray;
 use ini::Ini;
 use reqwest::header::CONTENT_LENGTH;
@@ -21,6 +23,8 @@ use tokio::sync::Semaphore;
 use la_tools::git_index;
 
 mod io_mgr;
+
+use io_mgr::IoMgr;
 
 struct FinalFile {
     hash: git_index::Hash,
@@ -36,10 +40,13 @@ struct Opts {
     output_dir: String,
     #[clap(long, default_value = "64")]
     network_threads: usize,
+    #[clap(long)]
+    system_dns: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum MainError {
+    DohFail,
     InvalidVersionIni,
     InvalidGitIndex,
 }
@@ -60,9 +67,35 @@ where
 {
     let opts = Opts::parse_from(itr);
 
-    let client = Client::builder()
-        .user_agent("PmangDownloader_27cf2b254140ab9a07a7b8615e18d902c0a26edc")
-        .build()?;
+    let mut client_builder =
+        Client::builder().user_agent("PmangDownloader_27cf2b254140ab9a07a7b8615e18d902c0a26edc");
+
+    if !opts.system_dns {
+        eprintln!("Finding real IP of la.cdn.gameon.jp");
+        let cdn_ip_str = async move {
+            let responses = async move {
+                let dns: Dns<HyperDnsClient> = Dns::with_servers(&[
+                    DnsHttpsServer::Google(Duration::from_secs(2)),
+                    DnsHttpsServer::Cloudflare1_1_1_1(Duration::from_secs(2)),
+                ])?;
+                dns.resolve_a("la.cdn.gameon.jp").await
+            }
+            .await
+            .map_err(|_| MainError::DohFail)?;
+            for response in responses {
+                return Ok(response.data);
+            }
+            Err(MainError::DohFail)
+        }
+        .await?;
+        eprintln!("la.cdn.gameon.jp is at {}", cdn_ip_str);
+        let cdn_addr: std::net::SocketAddrV4 = (cdn_ip_str + ":80")
+            .parse()
+            .map_err(|_| MainError::DohFail)?;
+        client_builder = client_builder.resolve("la.cdn.gameon.jp", cdn_addr.into());
+    }
+
+    let client = client_builder.build()?;
 
     eprintln!("Downloading version.ini");
     let version_ini_str = client
@@ -174,7 +207,7 @@ where
     let net_sem = Arc::new(Semaphore::new(opts.network_threads));
 
     eprintln!("Downloading object information");
-    let obj_size_tasks = todo_entries
+    let content_length_tasks = todo_entries
         .iter()
         .map(|e| {
             let sem = net_sem.clone();
@@ -194,14 +227,16 @@ where
         })
         .collect::<Vec<_>>();
 
-    let mut obj_sizes = Vec::<u64>::new();
-    obj_sizes.reserve_exact(todo_entries.len());
-    for (e, t) in zip(todo_entries.iter(), obj_size_tasks.into_iter()) {
+    let mut total_content_length = 0u64;
+    let mut content_lengths = Vec::<u64>::new();
+    content_lengths.reserve_exact(todo_entries.len());
+    for (e, t) in zip(todo_entries.iter(), content_length_tasks.into_iter()) {
         let res = t.await??;
         match res.headers().get(CONTENT_LENGTH) {
             Some(s) => {
-                let obj_size = s.to_str()?.parse()?;
-                obj_sizes.push(obj_size);
+                let content_length = s.to_str()?.parse()?;
+                total_content_length += content_length;
+                content_lengths.push(content_length);
             }
             None => {
                 eprintln!(
@@ -214,6 +249,16 @@ where
             }
         }
     }
+
+    eprintln!(
+        "Total of {:.3} GiB to download",
+        (total_content_length as f64) / 1024. / 1024. / 1024.
+    );
+
+    let mut io_mgr = Arc::new(Mutex::new(IoMgr::new()));
+
+    let total_chunks = 0usize;
+    for (e, l) in zip(todo_entries.iter(), content_lengths.iter()) {}
 
     Ok(0)
 }
