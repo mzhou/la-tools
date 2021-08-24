@@ -178,10 +178,8 @@ where
                 size: e.header.size.into(),
             })
         })
-        .take(128)
         .collect();
 
-    /*
     if entries.len() != index.entries.len() {
         eprintln!(
             "{} files had invalid filenames",
@@ -189,7 +187,6 @@ where
         );
         return Ok(3);
     }
-    */
 
     eprintln!("Calculating directories");
 
