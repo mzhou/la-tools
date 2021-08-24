@@ -40,7 +40,7 @@ struct FinalFile {
 
 #[derive(Clap)]
 struct Opts {
-    #[clap(long, default_value = "4")]
+    #[clap(long, default_value = "16")]
     disk_threads: usize,
     #[clap(long, default_value = "")]
     output_dir: String,
@@ -286,6 +286,8 @@ where
         (total_content_length as f64) / 1024. / 1024. / 1024.
     );
 
+    let disk_sem = Arc::new(Semaphore::new(opts.disk_threads));
+
     let mut total_chunks = 0u64;
     let file_tasks = zip(todo_entries.iter(), content_lengths.iter())
         .map(|(e, l)| {
@@ -358,13 +360,18 @@ where
 
             // TODO: task to decode the git object
             {
+                let disk_sem_clone = disk_sem.clone();
+
                 let task = tokio::spawn(async move {
                     for t in chunk_tasks.into_iter() {
                         t.await.map_err(TaskError::Join)??;
                     }
-                    eprintln!("Download complete for {}. Starting decompression", &name);
+                    eprintln!("Download complete for {}. Waiting for disk thread", &name);
 
                     tokio::task::spawn_blocking(move || {
+                        let _permit = disk_sem_clone.acquire_owned();
+                        eprintln!("Decompression started for {}", &name);
+
                         let mut dst_f = File::create(dst_path)?;
                         let tmp_f = File::open(tmp_path.clone())?;
                         let mut decode_read = git_object::decode_sync(tmp_f);
@@ -404,13 +411,13 @@ fn get_fallback_output_dir() -> String {
 
 #[cfg(target_os = "windows")]
 fn get_fallback_output_dir() -> String {
-    {
+    (move || {
         let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
-        let la_key = hkcu.open_subkey("SOFTWARE\\GameOn\\Pmang\\lostark")?;
-        let location_val = la_key.get_value("location")?;
+        let la_key = hkcu.open_subkey("SOFTWARE\\GameOn\\Pmang\\lostark").ok()?;
+        let location_val = la_key.get_value("location").ok()?;
         Some(location_val)
-    }
-    .unwrap_or("")
+    })()
+    .unwrap_or("".into())
 }
 
 fn url_for_hash<'a>(hash: &Hash) -> String {
