@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::fs::{create_dir_all, File};
+use std::fs::{create_dir_all, remove_file, File};
 use std::io::{copy, Error as IoError, Seek, SeekFrom, Write};
 use std::iter::zip;
 use std::mem::drop;
@@ -369,10 +369,14 @@ where
 
                     tokio::task::spawn_blocking(move || {
                         let mut dst_f = File::create(dst_path)?;
-                        let tmp_f = File::open(tmp_path)?;
+                        let tmp_f = File::open(tmp_path.clone())?;
                         let mut decode_read = git_object::decode_sync(tmp_f);
                         copy(&mut decode_read, &mut dst_f)?;
                         dst_f.flush()?;
+                        eprintln!("Decompression done for {}", &name);
+                        // close and delete temp file
+                        drop(decode_read);
+                        remove_file(tmp_path)?;
                         Ok(())
                     }).await.map_err(TaskError::Join)?.map_err(TaskError::Io)?;
 
