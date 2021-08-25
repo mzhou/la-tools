@@ -133,23 +133,23 @@ where
 
     let client = client_builder.build()?;
 
-    eprintln!("Downloading version.ini");
-    let version_ini_str = client
-        .get("http://games.cdn.gameon.jp/lostark/version.ini")
+    eprintln!("Downloading install.ini");
+    let install_ini_str = client
+        .get("http://games.cdn.gameon.jp/lostark/install.ini")
         .send()
         .await?
         .text()
         .await?;
 
-    let version_ini = Ini::load_from_str(&version_ini_str)?;
-    let index_name_str = version_ini
+    let install_ini = Ini::load_from_str(&install_ini_str)?;
+    let index_name_str = install_ini
         .get_from(Some("VERSION"), "INDEX")
         .ok_or(MainError::InvalidVersionIni)?;
 
     eprintln!("Current version is {}", index_name_str);
 
     if index_name_str.is_empty() {
-        eprintln!("Invalid VERSION.INDEX in version.ini");
+        eprintln!("Invalid VERSION.INDEX in install.ini");
         return Ok(2);
     }
 
