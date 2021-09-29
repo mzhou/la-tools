@@ -222,14 +222,13 @@ where
         create_dir_all(&p)?;
     }
 
-    eprintln!("Checking for already completed files:");
+    eprintln!("Checking for already completed files");
     let todo_entries: Vec<FinalFile> = entries
         .into_iter()
         .filter_map(|e| {
             if let Ok(mut f) = File::open(out_path.join(&e.name)) {
                 if let Ok(size) = f.seek(SeekFrom::End(0)) {
                     if size == e.size {
-                        eprintln!("    {}", e.name);
                         return None;
                     }
                 }
