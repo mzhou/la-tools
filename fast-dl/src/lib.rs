@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::fs::{create_dir_all, remove_file, File};
-use std::io::{copy, Error as IoError, Seek, SeekFrom, Write};
+use std::fs::{create_dir_all, metadata, remove_file, File};
+use std::io::{copy, Error as IoError, Write};
 use std::iter::zip;
 use std::mem::drop;
 use std::path::Path;
@@ -226,11 +226,9 @@ where
     let todo_entries: Vec<FinalFile> = entries
         .into_iter()
         .filter_map(|e| {
-            if let Ok(mut f) = File::open(out_path.join(&e.name)) {
-                if let Ok(size) = f.seek(SeekFrom::End(0)) {
-                    if size == e.size {
-                        return None;
-                    }
+            if let Ok(m) = metadata(out_path.join(&e.name)) {
+                if m.len() == e.size {
+                    return None;
                 }
             }
             Some(e)
