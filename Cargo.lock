@@ -564,6 +564,7 @@ dependencies = [
  "extract-git-object",
  "hash-git-object",
  "make-git-object",
+ "patch-git-index",
 ]
 
 [[package]]

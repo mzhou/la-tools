@@ -9,3 +9,4 @@ edition = "2018"
 extract-git-object = { path = "../extract-git-object" }
 hash-git-object = { path = "../hash-git-object" }
 make-git-object = { path = "../make-git-object" }
+patch-git-index = { path = "../patch-git-index" }

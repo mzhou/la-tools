@@ -29,7 +29,7 @@ where
         .map(|i| i.into().to_string_lossy().into())
         .collect();
     if args.len() < 4 {
-        eprintln!("Usage: make-git-object <name> <size> <hash>");
+        eprintln!("Usage: patch-git-index <name> <size> <hash>");
         return Ok(1);
     }
 

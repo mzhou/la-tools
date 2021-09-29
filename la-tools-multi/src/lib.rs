@@ -21,6 +21,7 @@ where
 
     for skip in 0..=1 {
         if args.len() < skip + 1 {
+            eprintln!("Missing applet name");
             usage();
             return Ok(127);
         }
@@ -29,6 +30,10 @@ where
 
         if let Some(r) = try_dispatch(&applet_name, &args[skip..]) {
             return r;
+        } else {
+            eprintln!("Invalid applet name: {}", &applet_name);
+            usage();
+            return Ok(127);
         }
     }
 
@@ -40,6 +45,7 @@ fn try_dispatch(applet_name: &str, args: &[OsString]) -> Option<Result<i32, Box<
         EXTRACT_GIT_OBJECT => Some(extract_git_object::try_main(args)),
         HASH_GIT_OBJECT => Some(hash_git_object::try_main(args)),
         MAKE_GIT_OBJECT => Some(make_git_object::try_main(args)),
+        PATCH_GIT_INDEX => Some(patch_git_index::try_main(args)),
         _ => None,
     }
 }
