@@ -10,7 +10,7 @@ clap = { version = "3.0.0-beta.4" }
 generic-array = { version = "0.14" }
 la-tools = { path = "../la-tools" }
 memmap2 = { version = "0.3" }
-reqwest = { version = "0.11" }
+reqwest = { default-features = false, version = "0.11" }
 rust-ini = { version = "0.17" }
 tokio = { features = ["full"], version = "1.10" }
 trust-dns-resolver = { features = ["dns-over-https-rustls"], version = "0.20" }

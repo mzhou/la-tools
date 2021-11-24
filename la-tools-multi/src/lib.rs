@@ -30,7 +30,7 @@ where
 
         if let Some(r) = try_dispatch(&applet_name, &args[skip..]) {
             return r;
-        } else {
+        } else if skip == 1 {
             eprintln!("Invalid applet name: {}", &applet_name);
             usage();
             return Ok(127);
