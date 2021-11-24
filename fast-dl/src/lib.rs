@@ -142,9 +142,24 @@ where
         .await?;
 
     let install_ini = Ini::load_from_str(&install_ini_str)?;
-    let index_name_str = install_ini
+    let install_ini_index_name_str = install_ini
         .get_from(Some("VERSION"), "INDEX")
         .ok_or(MainError::InvalidVersionIni)?;
+
+    eprintln!("Downloading version.ini");
+    let version_ini_str = client
+        .get("http://games.cdn.gameon.jp/lostark/version.ini")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    let version_ini = Ini::load_from_str(&version_ini_str)?;
+    let version_ini_index_name_str = version_ini
+        .get_from(Some("VERSION"), "INDEX")
+        .ok_or(MainError::InvalidVersionIni)?;
+
+    let index_name_str = std::cmp::max(install_ini_index_name_str, version_ini_index_name_str);
 
     eprintln!("Current version is {}", index_name_str);
 
