@@ -1,6 +1,3 @@
-#![feature(duration_consts_2)]
-#![feature(iter_zip)]
-
 mod io_mgr;
 
 use std::cmp::min;
@@ -42,6 +39,8 @@ struct FinalFile {
 struct Opts {
     #[clap(long, default_value = "16")]
     disk_threads: usize,
+    #[clap(long)]
+    no_pause: bool,
     #[clap(long, default_value = "")]
     output_dir: String,
     #[clap(long, default_value = "64")]
@@ -99,7 +98,28 @@ where
     T: Into<OsString> + Clone,
 {
     let opts = Opts::parse_from(itr);
+    let no_pause = opts.no_pause;
 
+    let result = try_main_inner(opts).await;
+
+    if !no_pause {
+        match &result {
+            Ok(_) => {
+                eprintln!("Everything OK! Press Enter to exit.");
+            }
+            Err(e) => {
+                eprintln!("{:?}", e);
+                eprintln!("Finished with errors. Please check the emessages above, press Enter to exit and try again.");
+            }
+        }
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+    }
+
+    result
+}
+
+async fn try_main_inner(opts: Opts) -> Result<i32, Box<dyn Error>> {
     let mut client_builder =
         Client::builder().user_agent("PmangDownloader_27cf2b254140ab9a07a7b8615e18d902c0a26edc");
 
@@ -409,6 +429,24 @@ where
             eprintln!("Error processing {} {}", entry.name, e);
             return Ok(6);
         }
+    }
+
+    eprintln!("Ensuring .gameon direcotry exists");
+    let dot_gameon_path = out_path.join(".gameon");
+    create_dir_all(&dot_gameon_path)?;
+
+    eprintln!("Updating .gameon/index");
+    {
+        let dst_path = dot_gameon_path.join("index");
+        let mut dst_f = File::create(dst_path)?;
+        dst_f.write_all(&index_bytes)?;
+    }
+
+    eprintln!("Updating .gameon/{}", &index_name_str);
+    {
+        let dst_path = dot_gameon_path.join(&index_name_str);
+        let mut dst_f = File::create(dst_path)?;
+        dst_f.write_all(&index_bytes)?;
     }
 
     eprintln!("All done!");
